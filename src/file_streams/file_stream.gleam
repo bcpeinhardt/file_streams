@@ -6,6 +6,7 @@ import file_streams/internal/raw_read_result.{type RawReadResult}
 import file_streams/internal/raw_result.{type RawResult}
 import file_streams/text_encoding
 import gleam/bit_array
+import gleam/bool
 import gleam/list
 import gleam/result
 import gleam/string
@@ -25,19 +26,8 @@ pub type BinaryFS
 /// The phantom type for a file stream opened for working with Text data.
 pub type TextFS
 
-/// Opens a new file stream that can read and/or write data from the specified
-/// file. See [`FileOpenMode`](./file_open_mode.html#FileOpenMode) for all of
-/// the available file modes.
-///
-/// For simple cases of opening a file stream use one of the
-/// [`open_read()`](#open_read), [`open_read_text()`](#open_read_text),
-/// [`open_write()`](#open_write), or [`open_write_text()`](#open_write_text)
-/// helper functions.
-/// 
-/// Once the file stream is no longer needed it should be closed with
-/// [`close()`](#close).
-///
-pub fn open(
+// Open a file stream
+fn open(
   filename: String,
   mode: List(FileOpenMode),
 ) -> Result(FileStream(binary_or_text), FileStreamError) {
@@ -60,6 +50,58 @@ pub fn open(
   use io_device <- result.try(erl_file_open(filename, mode))
 
   Ok(FileStream(io_device))
+}
+
+/// Opens a new file stream that can read and/or write binary data from the specified
+/// file. See [`FileOpenMode`](./file_open_mode.html#FileOpenMode) for all of
+/// the available file modes.
+/// 
+/// The `mode` list provided must include the `Binary` option or this 
+/// function will return an `Enotsup` error.
+///
+/// For simple cases of opening a file stream use one of the
+/// [`open_read()`](#open_read), [`open_read_text()`](#open_read_text),
+/// [`open_write()`](#open_write), or [`open_write_text()`](#open_write_text)
+/// helper functions.
+/// 
+/// Once the file stream is no longer needed it should be closed with
+/// [`close()`](#close).
+///
+pub fn open_binary(
+  filename: String,
+  mode: List(FileOpenMode),
+) -> Result(FileStream(BinaryFS), FileStreamError) {
+  use <- bool.guard(
+    !list.contains(mode, file_open_mode.Binary),
+    Error(file_stream_error.Enotsup),
+  )
+  open(filename, mode)
+}
+
+/// Opens a new file stream that can read and/or write text data from the specified
+/// file. See [`FileOpenMode`](./file_open_mode.html#FileOpenMode) for all of
+/// the available file modes.
+/// 
+/// The `mode` list provided must *NOT* include the `Binary` option or this 
+/// function will return an `Enotsup` error.
+///
+/// For simple cases of opening a file stream use one of the
+/// [`open_read()`](#open_read), [`open_read_text()`](#open_read_text),
+/// [`open_write()`](#open_write), or [`open_write_text()`](#open_write_text)
+/// helper functions.
+/// 
+/// Once the file stream is no longer needed it should be closed with
+/// [`close()`](#close).
+///
+pub fn open_text(
+  filename: String,
+  mode: List(FileOpenMode),
+) -> Result(FileStream(TextFS), FileStreamError) {
+  use <- bool.guard(
+    list.contains(mode, file_open_mode.Binary),
+    Error(file_stream_error.Enotsup),
+  )
+  open(filename, mode)
 }
 
 @external(erlang, "file", "open")

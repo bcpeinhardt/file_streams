@@ -192,7 +192,7 @@ pub fn position_test() {
 ///
 pub fn read_write_test() {
   let assert Ok(stream) =
-    file_stream.open(tmp_file_name, [
+    file_stream.open_binary(tmp_file_name, [
       file_open_mode.Read,
       file_open_mode.Write,
       file_open_mode.Binary,
@@ -225,7 +225,7 @@ pub fn append_test() {
   |> should.equal(Ok(Nil))
 
   let assert Ok(stream) =
-    file_stream.open(tmp_file_name, [file_open_mode.Append])
+    file_stream.open_text(tmp_file_name, [file_open_mode.Append])
 
   file_stream.write_chars(stream, "5678")
   |> should.equal(Ok(Nil))
@@ -304,7 +304,7 @@ pub fn read_latin1_test() {
   |> should.equal(Ok(Nil))
 
   let assert Ok(stream) =
-    file_stream.open(tmp_file_name, [
+    file_stream.open_text(tmp_file_name, [
       file_open_mode.Read,
       file_open_mode.Encoding(text_encoding.Latin1),
     ])
@@ -321,7 +321,7 @@ pub fn read_latin1_test() {
 
 pub fn write_latin1_test() {
   let assert Ok(stream) =
-    file_stream.open(tmp_file_name, [
+    file_stream.open_text(tmp_file_name, [
       file_open_mode.Write,
       file_open_mode.Encoding(text_encoding.Latin1),
     ])
@@ -336,7 +336,7 @@ pub fn write_latin1_test() {
   |> should.equal(Ok(<<0xC3, 0xD4>>))
 
   let assert Ok(stream) =
-    file_stream.open(tmp_file_name, [
+    file_stream.open_text(tmp_file_name, [
       file_open_mode.Write,
       file_open_mode.Encoding(text_encoding.Latin1),
     ])
@@ -358,7 +358,7 @@ pub fn read_utf16le_test() {
   |> should.equal(Ok(Nil))
 
   let assert Ok(stream) =
-    file_stream.open(tmp_file_name, [
+    file_stream.open_text(tmp_file_name, [
       file_open_mode.Read,
       file_open_mode.Encoding(text_encoding.Utf16(text_encoding.Little)),
     ])
@@ -375,7 +375,7 @@ pub fn read_utf16le_test() {
 
 pub fn write_utf16le_test() {
   let assert Ok(stream) =
-    file_stream.open(tmp_file_name, [
+    file_stream.open_text(tmp_file_name, [
       file_open_mode.Write,
       file_open_mode.Encoding(text_encoding.Utf16(text_encoding.Little)),
     ])
@@ -398,7 +398,7 @@ pub fn read_utf32be_test() {
   |> should.equal(Ok(Nil))
 
   let assert Ok(stream) =
-    file_stream.open(tmp_file_name, [
+    file_stream.open_text(tmp_file_name, [
       file_open_mode.Read,
       file_open_mode.Encoding(text_encoding.Utf32(text_encoding.Big)),
     ])
@@ -412,7 +412,7 @@ pub fn read_utf32be_test() {
 
 pub fn write_utf32be_test() {
   let assert Ok(stream) =
-    file_stream.open(tmp_file_name, [
+    file_stream.open_text(tmp_file_name, [
       file_open_mode.Write,
       file_open_mode.Encoding(text_encoding.Utf32(text_encoding.Big)),
     ])
