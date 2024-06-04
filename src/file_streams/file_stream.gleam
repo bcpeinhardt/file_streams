@@ -6,7 +6,6 @@ import file_streams/internal/raw_read_result.{type RawReadResult}
 import file_streams/internal/raw_result.{type RawResult}
 import file_streams/text_encoding
 import gleam/bit_array
-import gleam/bool
 import gleam/list
 import gleam/result
 import gleam/string
@@ -16,9 +15,15 @@ type IoDevice
 /// A file stream that data can be read from and/or written to depending on the
 /// mode specified when it was opened.
 ///
-pub opaque type FileStream {
-  FileStream(io_device: IoDevice, is_binary: Bool)
+pub opaque type FileStream(binary_or_text) {
+  FileStream(io_device: IoDevice)
 }
+
+/// The phantom type for a file stream opened for working with Binary data.
+pub type BinaryFS
+
+/// The phantom type for a file stream opened for working with Text data.
+pub type TextFS
 
 /// Opens a new file stream that can read and/or write data from the specified
 /// file. See [`FileOpenMode`](./file_open_mode.html#FileOpenMode) for all of
@@ -35,7 +40,7 @@ pub opaque type FileStream {
 pub fn open(
   filename: String,
   mode: List(FileOpenMode),
-) -> Result(FileStream, FileStreamError) {
+) -> Result(FileStream(binary_or_text), FileStreamError) {
   let is_binary = list.contains(mode, file_open_mode.Binary)
 
   let has_encoding =
@@ -54,7 +59,7 @@ pub fn open(
 
   use io_device <- result.try(erl_file_open(filename, mode))
 
-  Ok(FileStream(io_device, is_binary))
+  Ok(FileStream(io_device))
 }
 
 @external(erlang, "file", "open")
@@ -65,7 +70,9 @@ fn erl_file_open(
 
 /// Opens a new file stream for reading binary data from the specified file.
 ///
-pub fn open_read(filename: String) -> Result(FileStream, FileStreamError) {
+pub fn open_read(
+  filename: String,
+) -> Result(FileStream(BinaryFS), FileStreamError) {
   open(filename, [
     file_open_mode.Read,
     file_open_mode.ReadAhead(64 * 1024),
@@ -75,7 +82,9 @@ pub fn open_read(filename: String) -> Result(FileStream, FileStreamError) {
 
 /// Opens a new file stream for reading UTF-8 text from a file.
 ///
-pub fn open_read_text(filename: String) -> Result(FileStream, FileStreamError) {
+pub fn open_read_text(
+  filename: String,
+) -> Result(FileStream(TextFS), FileStreamError) {
   open(filename, [
     file_open_mode.Read,
     file_open_mode.ReadAhead(size: 64 * 1024),
@@ -84,7 +93,9 @@ pub fn open_read_text(filename: String) -> Result(FileStream, FileStreamError) {
 
 /// Opens a new file stream for writing binary data to the specified file.
 ///
-pub fn open_write(filename: String) -> Result(FileStream, FileStreamError) {
+pub fn open_write(
+  filename: String,
+) -> Result(FileStream(BinaryFS), FileStreamError) {
   open(filename, [
     file_open_mode.Write,
     file_open_mode.DelayedWrite(size: 64 * 1024, delay: 2000),
@@ -94,7 +105,9 @@ pub fn open_write(filename: String) -> Result(FileStream, FileStreamError) {
 
 /// Opens a new file stream for writing UTF-8 text to a file.
 ///
-pub fn open_write_text(filename: String) -> Result(FileStream, FileStreamError) {
+pub fn open_write_text(
+  filename: String,
+) -> Result(FileStream(TextFS), FileStreamError) {
   open(filename, [
     file_open_mode.Write,
     file_open_mode.DelayedWrite(size: 64 * 1024, delay: 2000),
@@ -103,7 +116,7 @@ pub fn open_write_text(filename: String) -> Result(FileStream, FileStreamError) 
 
 /// Closes a file stream that was opened with [`open()`](#open).
 ///
-pub fn close(stream: FileStream) -> Result(Nil, FileStreamError) {
+pub fn close(stream: FileStream(a)) -> Result(Nil, FileStreamError) {
   case erl_file_close(stream.io_device) {
     raw_result.Ok -> Ok(Nil)
     raw_result.Error(e) -> Error(e)
@@ -137,7 +150,7 @@ pub type FileStreamLocation {
 /// the file stream as an absolute offset in bytes.
 ///
 pub fn position(
-  stream: FileStream,
+  stream: FileStream(a),
   location: FileStreamLocation,
 ) -> Result(Int, FileStreamError) {
   let location = case location {
@@ -164,11 +177,9 @@ fn erl_file_position(
 /// Writes bytes to a binary file stream.
 ///
 pub fn write_bytes(
-  stream: FileStream,
+  stream: FileStream(BinaryFS),
   bytes: BitArray,
 ) -> Result(Nil, FileStreamError) {
-  use <- bool.guard(!stream.is_binary, Error(file_stream_error.Enotsup))
-
   case erl_file_write(stream.io_device, bytes) {
     raw_result.Ok -> Ok(Nil)
     raw_result.Error(e) -> Error(e)
@@ -182,11 +193,9 @@ fn erl_file_write(io_device: IoDevice, bytes: BitArray) -> RawResult
 /// the text encoding in use for the file stream.
 ///
 pub fn write_chars(
-  stream: FileStream,
+  stream: FileStream(TextFS),
   chars: String,
 ) -> Result(Nil, FileStreamError) {
-  use <- bool.guard(stream.is_binary, Error(file_stream_error.Enotsup))
-
   erl_io_put_chars(stream.io_device, chars)
 }
 
@@ -204,7 +213,7 @@ fn erl_io_put_chars(
 /// performance, syncing can return an error related to flushing recently
 /// written data to the underlying device.
 ///
-pub fn sync(stream: FileStream) -> Result(Nil, FileStreamError) {
+pub fn sync(stream: FileStream(a)) -> Result(Nil, FileStreamError) {
   case erl_file_sync(stream.io_device) {
     raw_result.Ok -> Ok(Nil)
     raw_result.Error(e) -> Error(e)
@@ -222,11 +231,9 @@ fn erl_file_sync(io_device: IoDevice) -> RawResult
 /// then `Error(Eof)` is returned.
 ///
 pub fn read_bytes(
-  stream: FileStream,
+  stream: FileStream(BinaryFS),
   byte_count: Int,
 ) -> Result(BitArray, FileStreamError) {
-  use <- bool.guard(!stream.is_binary, Error(file_stream_error.Enotsup))
-
   case erl_file_read(stream.io_device, byte_count) {
     raw_read_result.Ok(bytes) -> Ok(bytes)
     raw_read_result.Eof -> Error(file_stream_error.Eof)
@@ -245,7 +252,7 @@ fn erl_file_read(
 /// file stream then `Error(Eof)` is returned.
 ///
 pub fn read_bytes_exact(
-  stream: FileStream,
+  stream: FileStream(BinaryFS),
   byte_count: Int,
 ) -> Result(BitArray, FileStreamError) {
   case read_bytes(stream, byte_count) {
@@ -265,13 +272,13 @@ pub fn read_bytes_exact(
 /// return an empty bit array. It never returns `Error(Eof)`.
 ///
 pub fn read_remaining_bytes(
-  stream: FileStream,
+  stream: FileStream(BinaryFS),
 ) -> Result(BitArray, FileStreamError) {
   do_read_remaining_bytes(stream, [])
 }
 
 fn do_read_remaining_bytes(
-  stream: FileStream,
+  stream: FileStream(BinaryFS),
   acc: List(BitArray),
 ) -> Result(BitArray, FileStreamError) {
   case read_bytes(stream, 64 * 1024) {
@@ -291,9 +298,7 @@ fn do_read_remaining_bytes(
 /// will include the newline `\n` character. If the stream contains a Windows
 /// newline `\r\n` then only the `\n` will be returned.
 ///
-pub fn read_line(stream: FileStream) -> Result(String, FileStreamError) {
-  use <- bool.guard(stream.is_binary, Error(file_stream_error.Enotsup))
-
+pub fn read_line(stream: FileStream(TextFS)) -> Result(String, FileStreamError) {
   case erl_io_get_line(stream.io_device) {
     raw_read_result.Ok(data) -> codepoints_to_string(data)
     raw_read_result.Eof -> Error(file_stream_error.Eof)
@@ -309,11 +314,9 @@ fn erl_io_get_line(io_device: IoDevice) -> RawReadResult(List(Int))
 /// end of the stream is reached.
 ///
 pub fn read_chars(
-  stream: FileStream,
+  stream: FileStream(TextFS),
   count: Int,
 ) -> Result(String, FileStreamError) {
-  use <- bool.guard(stream.is_binary, Error(file_stream_error.Enotsup))
-
   case erl_io_get_chars(stream.io_device, count) {
     raw_read_result.Ok(data) -> codepoints_to_string(data)
     raw_read_result.Eof -> Error(file_stream_error.Eof)
@@ -336,7 +339,7 @@ fn codepoints_to_string(
 
 /// Reads an 8-bit signed integer from a binary file stream.
 ///
-pub fn read_int8(stream: FileStream) -> Result(Int, FileStreamError) {
+pub fn read_int8(stream: FileStream(BinaryFS)) -> Result(Int, FileStreamError) {
   use bits <- result.map(read_bytes_exact(stream, 1))
 
   let assert <<v:signed-size(8)>> = bits
@@ -345,7 +348,7 @@ pub fn read_int8(stream: FileStream) -> Result(Int, FileStreamError) {
 
 /// Reads an 8-bit unsigned integer from a binary file stream.
 ///
-pub fn read_uint8(stream: FileStream) -> Result(Int, FileStreamError) {
+pub fn read_uint8(stream: FileStream(BinaryFS)) -> Result(Int, FileStreamError) {
   use bits <- result.map(read_bytes_exact(stream, 1))
 
   let assert <<v:unsigned-size(8)>> = bits
@@ -354,7 +357,9 @@ pub fn read_uint8(stream: FileStream) -> Result(Int, FileStreamError) {
 
 /// Reads a little-endian 16-bit signed integer from a binary file stream.
 ///
-pub fn read_int16_le(stream: FileStream) -> Result(Int, FileStreamError) {
+pub fn read_int16_le(
+  stream: FileStream(BinaryFS),
+) -> Result(Int, FileStreamError) {
   use bits <- result.map(read_bytes_exact(stream, 2))
 
   let assert <<v:little-signed-size(16)>> = bits
@@ -363,7 +368,9 @@ pub fn read_int16_le(stream: FileStream) -> Result(Int, FileStreamError) {
 
 /// Reads a big-endian 16-bit signed integer from a binary file stream.
 ///
-pub fn read_int16_be(stream: FileStream) -> Result(Int, FileStreamError) {
+pub fn read_int16_be(
+  stream: FileStream(BinaryFS),
+) -> Result(Int, FileStreamError) {
   use bits <- result.map(read_bytes_exact(stream, 2))
 
   let assert <<v:big-signed-size(16)>> = bits
@@ -372,7 +379,9 @@ pub fn read_int16_be(stream: FileStream) -> Result(Int, FileStreamError) {
 
 /// Reads a little-endian 16-bit unsigned integer from a binary file stream.
 ///
-pub fn read_uint16_le(stream: FileStream) -> Result(Int, FileStreamError) {
+pub fn read_uint16_le(
+  stream: FileStream(BinaryFS),
+) -> Result(Int, FileStreamError) {
   use bits <- result.map(read_bytes_exact(stream, 2))
 
   let assert <<v:little-unsigned-size(16)>> = bits
@@ -381,7 +390,9 @@ pub fn read_uint16_le(stream: FileStream) -> Result(Int, FileStreamError) {
 
 /// Reads a big-endian 16-bit unsigned integer from a binary file stream.
 ///
-pub fn read_uint16_be(stream: FileStream) -> Result(Int, FileStreamError) {
+pub fn read_uint16_be(
+  stream: FileStream(BinaryFS),
+) -> Result(Int, FileStreamError) {
   use bits <- result.map(read_bytes_exact(stream, 2))
 
   let assert <<v:big-unsigned-size(16)>> = bits
@@ -390,7 +401,9 @@ pub fn read_uint16_be(stream: FileStream) -> Result(Int, FileStreamError) {
 
 /// Reads a little-endian 32-bit signed integer from a binary file stream.
 ///
-pub fn read_int32_le(stream: FileStream) -> Result(Int, FileStreamError) {
+pub fn read_int32_le(
+  stream: FileStream(BinaryFS),
+) -> Result(Int, FileStreamError) {
   use bits <- result.map(read_bytes_exact(stream, 4))
 
   let assert <<v:little-signed-size(32)>> = bits
@@ -399,7 +412,9 @@ pub fn read_int32_le(stream: FileStream) -> Result(Int, FileStreamError) {
 
 /// Reads a big-endian 32-bit signed integer from a binary file stream.
 ///
-pub fn read_int32_be(stream: FileStream) -> Result(Int, FileStreamError) {
+pub fn read_int32_be(
+  stream: FileStream(BinaryFS),
+) -> Result(Int, FileStreamError) {
   use bits <- result.map(read_bytes_exact(stream, 4))
 
   let assert <<v:big-signed-size(32)>> = bits
@@ -408,7 +423,9 @@ pub fn read_int32_be(stream: FileStream) -> Result(Int, FileStreamError) {
 
 /// Reads a little-endian 32-bit unsigned integer from a binary file stream.
 ///
-pub fn read_uint32_le(stream: FileStream) -> Result(Int, FileStreamError) {
+pub fn read_uint32_le(
+  stream: FileStream(BinaryFS),
+) -> Result(Int, FileStreamError) {
   use bits <- result.map(read_bytes_exact(stream, 4))
 
   let assert <<v:little-unsigned-size(32)>> = bits
@@ -417,7 +434,9 @@ pub fn read_uint32_le(stream: FileStream) -> Result(Int, FileStreamError) {
 
 /// Reads a big-endian 32-bit unsigned integer from a binary file stream.
 ///
-pub fn read_uint32_be(stream: FileStream) -> Result(Int, FileStreamError) {
+pub fn read_uint32_be(
+  stream: FileStream(BinaryFS),
+) -> Result(Int, FileStreamError) {
   use bits <- result.map(read_bytes_exact(stream, 4))
 
   let assert <<v:big-unsigned-size(32)>> = bits
@@ -426,7 +445,9 @@ pub fn read_uint32_be(stream: FileStream) -> Result(Int, FileStreamError) {
 
 /// Reads a little-endian 64-bit signed integer from a binary file stream.
 ///
-pub fn read_int64_le(stream: FileStream) -> Result(Int, FileStreamError) {
+pub fn read_int64_le(
+  stream: FileStream(BinaryFS),
+) -> Result(Int, FileStreamError) {
   use bits <- result.map(read_bytes_exact(stream, 8))
 
   let assert <<v:little-signed-size(64)>> = bits
@@ -435,7 +456,9 @@ pub fn read_int64_le(stream: FileStream) -> Result(Int, FileStreamError) {
 
 /// Reads a big-endian 64-bit signed integer from a binary file stream.
 ///
-pub fn read_int64_be(stream: FileStream) -> Result(Int, FileStreamError) {
+pub fn read_int64_be(
+  stream: FileStream(BinaryFS),
+) -> Result(Int, FileStreamError) {
   use bits <- result.map(read_bytes_exact(stream, 8))
 
   let assert <<v:big-signed-size(64)>> = bits
@@ -444,7 +467,9 @@ pub fn read_int64_be(stream: FileStream) -> Result(Int, FileStreamError) {
 
 /// Reads a little-endian 64-bit unsigned integer from a binary file stream.
 ///
-pub fn read_uint64_le(stream: FileStream) -> Result(Int, FileStreamError) {
+pub fn read_uint64_le(
+  stream: FileStream(BinaryFS),
+) -> Result(Int, FileStreamError) {
   use bits <- result.map(read_bytes_exact(stream, 8))
 
   let assert <<v:little-unsigned-size(64)>> = bits
@@ -453,7 +478,9 @@ pub fn read_uint64_le(stream: FileStream) -> Result(Int, FileStreamError) {
 
 /// Reads a big-endian 64-bit unsigned integer from a binary file stream.
 ///
-pub fn read_uint64_be(stream: FileStream) -> Result(Int, FileStreamError) {
+pub fn read_uint64_be(
+  stream: FileStream(BinaryFS),
+) -> Result(Int, FileStreamError) {
   use bits <- result.map(read_bytes_exact(stream, 8))
 
   let assert <<v:big-unsigned-size(64)>> = bits
@@ -462,7 +489,9 @@ pub fn read_uint64_be(stream: FileStream) -> Result(Int, FileStreamError) {
 
 /// Reads a little-endian 32-bit float from a binary file stream.
 ///
-pub fn read_float32_le(stream: FileStream) -> Result(Float, FileStreamError) {
+pub fn read_float32_le(
+  stream: FileStream(BinaryFS),
+) -> Result(Float, FileStreamError) {
   use bits <- result.map(read_bytes_exact(stream, 4))
 
   let assert <<v:little-float-size(32)>> = bits
@@ -471,7 +500,9 @@ pub fn read_float32_le(stream: FileStream) -> Result(Float, FileStreamError) {
 
 /// Reads a big-endian 32-bit float from a binary file stream.
 ///
-pub fn read_float32_be(stream: FileStream) -> Result(Float, FileStreamError) {
+pub fn read_float32_be(
+  stream: FileStream(BinaryFS),
+) -> Result(Float, FileStreamError) {
   use bits <- result.map(read_bytes_exact(stream, 4))
 
   let assert <<v:big-float-size(32)>> = bits
@@ -480,7 +511,9 @@ pub fn read_float32_be(stream: FileStream) -> Result(Float, FileStreamError) {
 
 /// Reads a little-endian 64-bit float from a binary file stream.
 ///
-pub fn read_float64_le(stream: FileStream) -> Result(Float, FileStreamError) {
+pub fn read_float64_le(
+  stream: FileStream(BinaryFS),
+) -> Result(Float, FileStreamError) {
   use bits <- result.map(read_bytes_exact(stream, 8))
 
   let assert <<v:little-float-size(64)>> = bits
@@ -489,7 +522,9 @@ pub fn read_float64_le(stream: FileStream) -> Result(Float, FileStreamError) {
 
 /// Reads a big-endian 64-bit float from a binary file stream.
 ///
-pub fn read_float64_be(stream: FileStream) -> Result(Float, FileStreamError) {
+pub fn read_float64_be(
+  stream: FileStream(BinaryFS),
+) -> Result(Float, FileStreamError) {
   use bits <- result.map(read_bytes_exact(stream, 8))
 
   let assert <<v:big-float-size(64)>> = bits
@@ -511,8 +546,8 @@ pub fn read_float64_be(stream: FileStream) -> Result(Float, FileStreamError) {
 /// ```
 ///
 pub fn read_list(
-  stream: FileStream,
-  item_read_fn: fn(FileStream) -> Result(a, FileStreamError),
+  stream: FileStream(BinaryFS),
+  item_read_fn: fn(FileStream(BinaryFS)) -> Result(a, FileStreamError),
   item_count: Int,
 ) -> Result(List(a), FileStreamError) {
   do_read_list(stream, item_read_fn, item_count, [])
@@ -520,8 +555,8 @@ pub fn read_list(
 }
 
 fn do_read_list(
-  stream: FileStream,
-  item_read_fn: fn(FileStream) -> Result(a, FileStreamError),
+  stream: FileStream(BinaryFS),
+  item_read_fn: fn(FileStream(BinaryFS)) -> Result(a, FileStreamError),
   item_count: Int,
   acc: List(a),
 ) -> Result(List(a), FileStreamError) {
